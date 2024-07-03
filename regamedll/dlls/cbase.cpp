@@ -1473,9 +1473,20 @@ VectorRef CBaseEntity::__API_HOOK(FireBullets3)(VectorRef vecSrc, VectorRef vecD
 			float flDistanceModifier;
 			if (VARS(tr.pHit)->solid != SOLID_BSP || !iPenetration)
 			{
-				iPenetrationPower = 42;
-				flDamageModifier = 0.75;
-				flDistanceModifier = 0.75;
+				CBasePlayer* pPlayer = GetClassPtr<CCSPlayer>((CBasePlayer*)pEntity->pev);
+				if (pPlayer && pPlayer->IsPlayer() && pPlayer->m_iTeam == CT)
+				{
+					iPenetrationPower = 100;
+					flDamageModifier = 1.0;
+					flDistanceModifier = 1.0;
+					iPenetration ++;
+				}
+				else
+				{
+					iPenetrationPower = 42;
+					flDamageModifier = 0.75;
+					flDistanceModifier = 0.75;
+				}
 			}
 			else
 				flDistanceModifier = 0.5;
