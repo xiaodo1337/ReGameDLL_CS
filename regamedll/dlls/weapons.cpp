@@ -79,7 +79,7 @@ LINK_HOOK_VOID_CHAIN2(ClearMultiDamage)
 // Resets the global multi damage accumulator
 void EXT_FUNC __API_HOOK(ClearMultiDamage)()
 {
-	gMultiDamage.pEntity = nullptr;
+	gMultiDamage.hEntity = nullptr;
 	gMultiDamage.amount = 0;
 	gMultiDamage.type = 0;
 }
@@ -89,11 +89,15 @@ LINK_HOOK_VOID_CHAIN(ApplyMultiDamage, (entvars_t *pevInflictor, entvars_t *pevA
 // Inflicts contents of global multi damage register on gMultiDamage.pEntity
 void EXT_FUNC __API_HOOK(ApplyMultiDamage)(entvars_t *pevInflictor, entvars_t *pevAttacker)
 {
-	if (!gMultiDamage.pEntity)
+	EntityHandle<CBaseEntity> hEnt = gMultiDamage.hEntity;
+	if (!hEnt)
 		return;
 
-	gMultiDamage.pEntity->TakeDamage(pevInflictor, pevAttacker, gMultiDamage.amount, gMultiDamage.type);
-	gMultiDamage.pEntity->ResetDmgPenetrationLevel();
+	hEnt->TakeDamage(pevInflictor, pevAttacker, gMultiDamage.amount, gMultiDamage.type);
+
+	// check again, the entity may be removed after taking damage
+	if (hEnt)
+		hEnt->ResetDmgPenetrationLevel();
 }
 
 LINK_HOOK_VOID_CHAIN(AddMultiDamage, (entvars_t *pevInflictor, CBaseEntity *pEntity, float flDamage, int bitsDamageType), pevInflictor, pEntity, flDamage, bitsDamageType)
@@ -105,11 +109,17 @@ void EXT_FUNC __API_HOOK(AddMultiDamage)(entvars_t *pevInflictor, CBaseEntity *p
 
 	gMultiDamage.type |= bitsDamageType;
 
-	if (pEntity != gMultiDamage.pEntity)
+	if (pEntity != gMultiDamage.hEntity)
 	{
-		// UNDONE: wrong attacker!
-		ApplyMultiDamage(pevInflictor, pevInflictor);
-		gMultiDamage.pEntity = pEntity;
+#ifdef REGAMEDLL_FIXES
+		if (gMultiDamage.hEntity) // avoid api calls with null default pEntity
+#endif
+		{
+			// UNDONE: wrong attacker!
+			ApplyMultiDamage(pevInflictor, pevInflictor);
+		}
+
+		gMultiDamage.hEntity = pEntity;
 		gMultiDamage.amount = 0;
 	}
 
@@ -1454,8 +1464,11 @@ void CBasePlayerWeapon::ReloadSound()
 	CBasePlayer *pPlayer = nullptr;
 	while ((pPlayer = UTIL_FindEntityByClassname(pPlayer, "player")))
 	{
-		if (pPlayer->IsDormant())
+		if (FNullEnt(pPlayer->edict()))
 			break;
+
+		if (pPlayer->IsDormant())
+			continue;
 
 		if (pPlayer == m_pPlayer)
 			continue;
@@ -1974,6 +1987,7 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 		if (!m_rgpPlayerItems[i])
 			continue;
 
+		CBasePlayerItem *pPrev = NULL;
 		CBasePlayerItem *pItem = m_rgpPlayerItems[i];
 
 		// have at least one weapon in this slot
@@ -2036,7 +2050,7 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 					if (!pEntity->IsPlayer())
 						continue;
 
-					if (pEntity->pev->flags == FL_DORMANT)
+					if (pEntity->IsDormant())
 						continue;
 
 					CBasePlayer *pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pEntity->pev);
@@ -2070,13 +2084,13 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 			}
 			else if (i == GRENADE_SLOT)
 			{
-				CBasePlayerWeapon *pGrenade = static_cast<CBasePlayerWeapon *>(m_rgpPlayerItems[i]);
+				CBasePlayerWeapon *pGrenade = static_cast<CBasePlayerWeapon *>(pItem);
 				if (pGrenade && pGrenade->IsWeapon())
 				{
 					int playerGrenades = pPlayer->m_rgAmmo[pGrenade->m_iPrimaryAmmoType];
 
 #ifdef REGAMEDLL_FIXES
-					CBasePlayerItem *pNext = m_rgpPlayerItems[i]->m_pNext;
+					CBasePlayerItem *pNext = pItem->m_pNext;
 
 					// Determine the max ammo capacity for the picked-up grenade
 					int iMaxPickupAmmo = pGrenade->iMaxAmmo1();
@@ -2094,7 +2108,11 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 						playerGrenades, pGrenade->pszAmmo1(), iMaxPickupAmmo, &givenItem))
 					{
 						// unlink this weapon from the box
-						m_rgpPlayerItems[i] = pItem = pNext;
+						if (pPrev)
+							pPrev->m_pNext = pItem = pNext;
+						else
+							m_rgpPlayerItems[i] = pItem = pNext;
+
 						continue;
 					}
 #else
@@ -2143,7 +2161,8 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 			}
 			else
 			{
-				auto pNext = m_rgpPlayerItems[i]->m_pNext;
+				CBasePlayerItem *pNext = pItem->m_pNext;
+
 				if (pPlayer->AddPlayerItem(pItem))
 				{
 					pItem->AttachToPlayer(pPlayer);
@@ -2155,12 +2174,17 @@ void CWeaponBox::Touch(CBaseEntity *pOther)
 				}
 
 				// unlink this weapon from the box
-				m_rgpPlayerItems[i] = pItem = pNext;
+				if (pPrev)
+					pPrev->m_pNext = pNext;
+				else
+					m_rgpPlayerItems[i] = pItem = pNext;
+
 				continue;
 			}
 
 			bRemove = false;
-			pItem = m_rgpPlayerItems[i]->m_pNext;
+			pPrev = pItem;
+			pItem = pItem->m_pNext;
 		}
 	}
 

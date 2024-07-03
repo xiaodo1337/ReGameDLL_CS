@@ -438,6 +438,9 @@ NOXREF int CountTeams()
 		if (FNullEnt(pEntity->edict()))
 			break;
 
+		if (pEntity->IsDormant())
+			continue;
+
 		CBasePlayer *pPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pEntity->pev);
 
 		if (pPlayer->m_iTeam == UNASSIGNED)
@@ -499,7 +502,8 @@ int CountTeamPlayers(int iTeam)
 		if (pEntity->IsDormant())
 			continue;
 
-		if (GetClassPtr<CCSPlayer>((CBasePlayer *)pEntity->pev)->m_iTeam == iTeam)
+		CBasePlayer *pPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pEntity->pev);
+		if (pPlayer->m_iTeam == iTeam)
 		{
 			nCount++;
 		}
@@ -533,6 +537,9 @@ void ProcessKickVote(CBasePlayer *pVotingPlayer, CBasePlayer *pKickPlayer)
 	{
 		if (FNullEnt(pTempEntity->edict()))
 			break;
+
+		if (pTempEntity->IsDormant())
+			continue;
 
 		pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
 
@@ -570,6 +577,9 @@ void ProcessKickVote(CBasePlayer *pVotingPlayer, CBasePlayer *pKickPlayer)
 		{
 			if (FNullEnt(pTempEntity->edict()))
 				break;
+
+			if (pTempEntity->IsDormant())
+				continue;
 
 			pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
 
@@ -829,14 +839,18 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 		return;
 
 	const char *placeName = nullptr;
-	char *pszFormat = nullptr;
+	const char *pszFormat = nullptr;
 	char *pszConsoleFormat = nullptr;
 	bool consoleUsesPlaceName = false;
 
 	// team only
 	if (teamonly)
 	{
-		if (AreRunningCZero() && (pPlayer->m_iTeam == CT || pPlayer->m_iTeam == TERRORIST))
+		if ((
+#ifdef REGAMEDLL_ADD
+			location_area_info.value >= 2 ||
+#endif
+			AreRunningCZero()) && (pPlayer->m_iTeam == CT || pPlayer->m_iTeam == TERRORIST))
 		{
 			// search the place name where is located the player
 			Place playerPlace = TheNavAreaGrid.GetPlace(&pPlayer->pev->origin);
@@ -850,7 +864,16 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 					break;
 				}
 			}
+
+			if (!placeName)
+				placeName = TheNavAreaGrid.IDToName(playerPlace);
 		}
+
+		bool bUseLocFallback = false;
+#ifdef REGAMEDLL_ADD
+		if (chat_loc_fallback.value)
+			bUseLocFallback = true;
+#endif
 
 		if (pPlayer->m_iTeam == CT)
 		{
@@ -861,7 +884,7 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 			}
 			else if (placeName)
 			{
-				pszFormat = "#Cstrike_Chat_CT_Loc";
+				pszFormat = bUseLocFallback ? "\x1(Counter-Terrorist) \x3%s1\x1 @ \x4%s3\x1 :  %s2" : "#Cstrike_Chat_CT_Loc";
 				pszConsoleFormat = "*(Counter-Terrorist) %s @ %s : %s";
 				consoleUsesPlaceName = true;
 			}
@@ -880,7 +903,7 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 			}
 			else if (placeName)
 			{
-				pszFormat = "#Cstrike_Chat_T_Loc";
+				pszFormat = bUseLocFallback ? "\x1(Terrorist) \x3%s1\x1 @ \x4%s3\x1 :  %s2" : "#Cstrike_Chat_T_Loc";
 				pszConsoleFormat = "(Terrorist) %s @ %s : %s";
 				consoleUsesPlaceName = true;
 			}
@@ -961,6 +984,9 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 			continue;
 
 		if (pReceiver->edict() == pEntity)
+			continue;
+
+		if (pReceiver->IsDormant())
 			continue;
 
 		// Not a client ? (should never be true)
@@ -2330,6 +2356,9 @@ CBaseEntity *EntityFromUserID(int userID)
 		if (FNullEnt(pTempEntity->edict()))
 			break;
 
+		if (pTempEntity->IsDormant())
+			continue;
+
 		CBasePlayer *pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
 
 		if (pTempPlayer->m_iTeam != UNASSIGNED && userID == GETPLAYERUSERID(pTempEntity->edict()))
@@ -2349,6 +2378,9 @@ NOXREF int CountPlayersInServer()
 	{
 		if (FNullEnt(pTempEntity->edict()))
 			break;
+
+		if (pTempEntity->IsDormant())
+			continue;
 
 		CBasePlayer *pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
 
@@ -3330,7 +3362,11 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 						for (int i = 1; i <= gpGlobals->maxClients; i++)
 						{
 							CBasePlayer *pObserver = UTIL_PlayerByIndex(i);
-							if (pObserver && pObserver->IsObservingPlayer(pPlayer))
+
+							if (!UTIL_IsValidPlayer(pObserver))
+								continue;
+
+							if (pObserver->IsObservingPlayer(pPlayer))
 							{
 								EMIT_SOUND(ENT(pObserver->pev), CHAN_ITEM, "items/nvg_off.wav", RANDOM_FLOAT(0.92, 1), ATTN_NORM);
 
@@ -3355,7 +3391,11 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 						for (int i = 1; i <= gpGlobals->maxClients; i++)
 						{
 							CBasePlayer *pObserver = UTIL_PlayerByIndex(i);
-							if (pObserver && pObserver->IsObservingPlayer(pPlayer))
+
+							if (!UTIL_IsValidPlayer(pObserver))
+								continue;
+
+							if (pObserver->IsObservingPlayer(pPlayer))
 							{
 								EMIT_SOUND(ENT(pObserver->pev), CHAN_ITEM, "items/nvg_on.wav", RANDOM_FLOAT(0.92, 1), ATTN_NORM);
 
@@ -3723,6 +3763,9 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 
 #ifdef REGAMEDLL_ADD
 	CSGameRules()->ServerActivate();
+
+	if (location_area_info.value)
+		LoadNavigationMap();
 #endif
 }
 
